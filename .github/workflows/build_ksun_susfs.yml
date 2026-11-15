@@ -50,8 +50,9 @@ jobs:
           cp -r susfs_repo/kernel_patches/fs/* fs/
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
 
-          echo "=== Adding SuSFS v1.5.8+ API compatibility stubs to susfs.h ==="
-          printf '\n#ifndef SUSFS_COMPAT_STUBS_H\n#define SUSFS_COMPAT_STUBS_H\nstatic inline void susfs_set_current_proc_no_su(void) {}\nstatic inline void susfs_set_current_non_root_user_app_proc(void) {}\nstatic inline bool susfs_is_current_proc_umounted(void) { return false; }\n#endif\n' >> include/linux/susfs.h
+          echo "=== Adding SuSFS v1.5.8+ API compatibility stubs ==="
+          printf '#ifndef SUSFS_COMPAT_STUBS_H\n#define SUSFS_COMPAT_STUBS_H\n#include <linux/types.h>\nstatic inline bool susfs_is_current_proc_no_su(void) { return false; }\nstatic inline void susfs_set_current_proc_no_su(void) {}\nstatic inline void susfs_set_current_non_root_user_app_proc(void) {}\nstatic inline bool susfs_is_current_proc_umounted(void) { return false; }\n#endif\n' > include/linux/susfs_compat.h
+          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>' {} +
 
           echo "=== Applying SuSFS patch to 4.19 Kernel ==="
           patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
