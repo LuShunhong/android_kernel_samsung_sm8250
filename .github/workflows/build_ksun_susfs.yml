@@ -24,13 +24,13 @@ jobs:
             python3 adb zip curl xz-utils \
             llvm lld dwarves git unzip wget zstd jq ccache patch
 
-      - name: 3. Download latest Google clang
+      - name: 3. Download Prebuilt Clang
         run: |
-          wget -O llvm.tar.zst https://github.com
-          mkdir -p llvm-21 && cd llvm-21
-          tar -I unzstd -xf ../llvm.tar.zst
-          rm ../llvm.tar.zst
-          cd ..
+          wget -O clang.tar.gz https://github.com
+          mkdir -p llvm-21
+          tar -xzf clang.tar.gz -C llvm-21
+          rm clang.tar.gz
+
 
       - name: 4. Integrate KernelSU Next (legacy 4.19) & SuSFS
         run: |
