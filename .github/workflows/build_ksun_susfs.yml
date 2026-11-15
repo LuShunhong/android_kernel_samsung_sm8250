@@ -26,14 +26,10 @@ jobs:
 
       - name: 3. Download Prebuilt Clang
         run: |
-          CLANG_URL=$(curl -s https://github.com | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url' | head -n 1)
-          echo "Downloading Clang from: $CLANG_URL"
-          wget -O clang.tar.gz "$CLANG_URL"
-          file clang.tar.gz
           mkdir -p llvm-21
+          wget -O clang.tar.gz https://googlesource.com
           tar -xzf clang.tar.gz -C llvm-21
           rm clang.tar.gz
-
 
       - name: 4. Integrate KernelSU Next (legacy 4.19) & SuSFS
         run: |
