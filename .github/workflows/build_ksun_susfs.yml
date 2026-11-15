@@ -53,11 +53,14 @@ jobs:
           patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
           echo "=== Applying 4.19 Manual Hooks for KSUN ==="
-          HOOK_HOST="://githubusercontent.com"
-          HOOK_PATH="JackA1ltman/NonGKI_Kernel_Build_2nd/main/Patches/susfs_inline_hook_patches.sh"
-          curl -LSs "https://${HOOK_HOST}/${HOOK_PATH}" -o hook.sh
-          chmod +x hook.sh
-          bash hook.sh || true
+          PATCH_HOST="github.com"
+          PATCH_PATH="JackA1ltman/NonGKI_Kernel_Build_2nd.git"
+          git clone --depth=1 "https://${PATCH_HOST}/${PATCH_PATH}" hook_repo
+          if [ -f "hook_repo/Patches/susfs_inline_hook_patches.sh" ]; then
+            bash hook_repo/Patches/susfs_inline_hook_patches.sh || true
+          else
+            find hook_repo -name "*hook*.sh" -exec bash {} \; || true
+          fi
 
           echo "=== Checking for patch conflicts (.rej) ==="
           find . -name "*.rej" -exec echo "CONFLICT FILE: {}" \; -exec cat {} \;
