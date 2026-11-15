@@ -51,8 +51,8 @@ jobs:
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
 
           echo "=== Adding SuSFS v1.5.8+ API compatibility stubs to susfs.h ==="
-          cat >> include/linux/susfs.h << 'EOF'
-
+          
+cat >> include/linux/susfs.h << 'EOF'
 #ifndef SUSFS_COMPAT_STUBS_H
 #define SUSFS_COMPAT_STUBS_H
 static inline void susfs_set_current_proc_no_su(void) {}
