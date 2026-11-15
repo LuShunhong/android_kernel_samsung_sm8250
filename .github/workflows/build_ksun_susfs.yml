@@ -30,22 +30,16 @@ jobs:
           echo "=== Removing old KernelSU ==="
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
           
-          echo "=== Installing KernelSU Next (legacy branch for 4.19) ==="
-          KSU_HOST="://githubusercontent.com"
-          KSU_PATH="KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
-          curl -LSs "https://${KSU_HOST}/${KSU_PATH}" | bash -s legacy
-          echo "=== Installing KernelSU Next (legacy branch for 4.19) ==="
-          KSU_HOST="://githubusercontent.com"
-          KSU_PATH="KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
-          curl -LSs "https://${KSU_HOST}/${KSU_PATH}" | bash -s legacy
+          echo "=== Cloning KernelSU Next (legacy branch) ==="
+          KSUN_HOST="github.com"
+          KSUN_PATH="KernelSU-Next/KernelSU-Next.git"
+          git clone --depth=1 -b legacy "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next || \
+          git clone --depth=1 -b next "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
 
-          if [ -d "KernelSU-Next/kernel" ] && [ ! -e "drivers/kernelsu" ]; then
-            ln -sf ../KernelSU-Next/kernel drivers/kernelsu
-          fi
-
-          echo "=== Checking created KSU directory ==="
-          ls -la
-          ls -la drivers/
+          echo "=== Linking drivers/kernelsu ==="
+          KSU_KDIR=$(find KernelSU-Next -name "Kconfig" -printf '%h\n' | head -n 1)
+          echo "Found KSU kernel dir at: $KSU_KDIR"
+          ln -s "$(pwd)/$KSU_KDIR" drivers/kernelsu
 
           echo "=== Downloading SuSFS 4.19 patches ==="
           REPO_HOST="gitlab.com"
@@ -55,11 +49,7 @@ jobs:
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
 
           echo "=== Applying SuSFS patch to KernelSU Next ==="
-          if [ -d "KernelSU-Next" ]; then
-            (cd KernelSU-Next && patch -p1 --fuzz=3 < ../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true)
-          elif [ -d "KernelSU" ]; then
-            (cd KernelSU && patch -p1 --fuzz=3 < ../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true)
-          fi
+          (cd KernelSU-Next && patch -p1 --fuzz=3 < ../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true)
 
           echo "=== Applying SuSFS patch to 4.19 Kernel ==="
           patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
