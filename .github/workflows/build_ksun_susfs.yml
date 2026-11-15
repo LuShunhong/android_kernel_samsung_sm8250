@@ -97,11 +97,12 @@ jobs:
           EOF
 
 
-
       - name: 5. Build kernel for x1q
         run: |
           chmod +x build_sm8250.sh
+          export MAKEFLAGS="-k"
           bash build_sm8250.sh x1q
+
 
       - name: 6. Upload AnyKernel3 zip
         uses: actions/upload-artifact@v5
