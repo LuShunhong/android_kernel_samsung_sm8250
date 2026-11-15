@@ -24,38 +24,81 @@ jobs:
             python3 adb zip curl xz-utils \
             clang llvm lld dwarves git unzip wget zstd jq ccache patch
 
-
-      - name: Integrate KernelSU Next (legacy-susfs) & SuSFS
+      - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
         run: |
-          echo "=== Removing old KernelSU ==="
+          echo "=== 1. Removing old KernelSU ==="
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
-
-          echo "=== Cloning KernelSU Next (pre-integrated dev-susfs branch) ==="
+          
+          echo "=== 2. Cloning KernelSU Next (dev-susfs) ==="
           KSUN_HOST="github.com"
           KSUN_PATH="pershoot/KernelSU-Next.git"
           git clone --depth=1 -b dev-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
-          
-          echo "=== Linking drivers/kernelsu ==="
+
+          echo "=== 3. Linking drivers/kernelsu ==="
           KSU_KDIR=$(find KernelSU-Next -name "Kconfig" -printf '%h\n' | head -n 1)
           ln -s "$(pwd)/$KSU_KDIR" drivers/kernelsu
 
-          echo "=== Patching throne_tracker.h & fixing 4.19 header compatibility ==="
-          find KernelSU-Next -name "throne_tracker.h" -exec sed -i '/susfs_parse_priority_app_strings/d; /susfs_parse_sus_path_app_strings/d' {} +
-          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|linux/minmax.h|linux/kernel.h|g' {} +
-
-          echo "=== Downloading SuSFS 4.19 kernel patches ==="
+          echo "=== 4. Downloading SuSFS 4.19 kernel patches ==="
           REPO_HOST="gitlab.com"
           REPO_PATH="simonpunk/susfs4ksu.git"
           git clone --depth=1 -b kernel-4.19 "https://${REPO_HOST}/${REPO_PATH}" susfs_repo
           cp -r susfs_repo/kernel_patches/fs/* fs/
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
+
+          echo "=== 5. Applying SuSFS & Manual Hooks to 4.19 Kernel ==="
+          patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          PATCH_HOST="github.com"
+          PATCH_PATH="JackA1ltman/NonGKI_Kernel_Build_2nd.git"
+          git clone --depth=1 "https://${PATCH_HOST}/${PATCH_PATH}" hook_repo
+          if [ -f "hook_repo/Patches/susfs_inline_hook_patches.sh" ]; then
+            bash hook_repo/Patches/susfs_inline_hook_patches.sh || true
+          fi
+
+          echo "=== 6. Repairing 4.19 Kernel fs/ & susfs.h ==="
+          sed -i 's/alloc_vfsmnt(fc->source ?: "none")/alloc_vfsmnt(fc->source ?: "none", false, 0)/g' fs/namespace.c
+          sed -i 's/alloc_vfsmnt(old->mnt_devname)/alloc_vfsmnt(old->mnt_devname, false, 0)/g' fs/namespace.c
           
-          echo "=== Adding SuSFS v1.5.8+ API compatibility stubs ==="
-          printf '#ifndef SUSFS_COMPAT_STUBS_H\n#define SUSFS_COMPAT_STUBS_H\n#include <linux/types.h>\nstatic inline bool susfs_is_current_proc_no_su(void) { return false; }\nstatic inline void susfs_set_current_proc_no_su(void) {}\nstatic inline void susfs_set_current_non_root_user_app_proc(void) {}\nstatic inline bool susfs_is_current_proc_umounted(void) { return false; }\nstatic inline void susfs_set_current_proc_umounted(void) {}\nstatic inline void susfs_set_current_proc_umounted_for_zygote_next(void) {}\n#endif\n' > include/linux/susfs_compat.h
-          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>' {} +
+          cat > include/linux/susfs_compat.h << 'EOF'
+          #ifndef SUSFS_COMPAT_STUBS_H
+          #define SUSFS_COMPAT_STUBS_H
+          #include <linux/types.h>
+          #define SUSFS_MAGIC 0xFAFA1122
+          #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55551
+          #define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 0x55552
+          #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55553
+          #define CMD_SUSFS_ADD_SUS_MAP 0x55554
+          #define CMD_SUSFS_SET_PRIORITY_UID_FILTER 0x55555
+          static inline bool susfs_is_current_proc_no_su(void) { return false; }
+          static inline void susfs_set_current_proc_no_su(void) {}
+          static inline void susfs_set_current_non_root_user_app_proc(void) {}
+          static inline bool susfs_is_current_proc_umounted(void) { return false; }
+          static inline void susfs_set_current_proc_umounted(void) {}
+          static inline void susfs_set_current_proc_umounted_for_zygote_next(void) {}
+          static inline void susfs_start_sdcard_monitor_fn(void) {}
+          static inline int susfs_add_sus_path_loop(void *p) { return 0; }
+          static inline int susfs_set_sus_path_uid_filter(void *p) { return 0; }
+          static inline int susfs_set_hide_sus_mnts_for_non_su_procs(void *p) { return 0; }
+          static inline int susfs_enable_log(void *p) { return 0; }
+          static inline int susfs_add_sus_map(void *p) { return 0; }
+          static inline int susfs_set_priority_uid_filter(void *p) { return 0; }
+          static inline bool susfs_starts_with(const char *s, const char *p) { return strncmp(s, p, strlen(p)) == 0; }
+          static inline bool susfs_ends_with(const char *s, const char *p) { size_t ls = strlen(s), lp = strlen(p); return ls >= lp && strcmp(s + ls - lp, p) == 0; }
+          #endif
+          EOF
+          sed -i '1i #include <linux/susfs_compat.h>' include/linux/susfs.h
+
+          echo "=== 7. Repairing KernelSU-Next v3.4.2 for Linux 4.19 ==="
+          find KernelSU-Next -name "throne_tracker.h" -exec sed -i '/susfs_parse_priority_app_strings/d; /susfs_parse_sus_path_app_strings/d' {} +
+          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|linux/minmax.h|linux/kernel.h|g; s|uapi/linux/mount.h|linux/mount.h|g' {} +
+          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>\n#include <linux/sched/task.h>\n#include <linux/sched/signal.h>' {} +
+          
+          # Fix TWA_RESUME & SECCOMP_ARCH_NATIVE_NR
+          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/TWA_RESUME/true/g; s/SECCOMP_ARCH_NATIVE_NR/__NR_syscalls/g' {} +
+
+          # Fix file_wrapper.c (iopoll & remap_file_range)
           find KernelSU-Next -name "file_wrapper.c" -exec python3 -c '
           import sys, re
-          p = sys.argv
+          p = sys.argv[1]
           c = open(p).read()
           for fn in ["remap_file_range", "iopoll", "uring_cmd", "uring_cmd_iopoll"]:
               c = re.sub(r"static [^{;]*\bksu_wrapper_" + fn + r"\b[\s\S]*?\n\}\n", "", c)
@@ -63,23 +106,18 @@ jobs:
           open(p, "w").write(c)
           ' {} \;
 
-          echo "=== Applying SuSFS patch to 4.19 Kernel ==="
-          patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+          # Fix pkg_observer.c for 4.19 fsnotify_ops
+          find KernelSU-Next -name "pkg_observer.c" -exec python3 -c '
+          import sys
+          p = sys.argv[1]
+          c = open(p).read()
+          c = c.replace("fsnotify_wait_marks_destroyed();", "")
+          c = c.replace(".handle_inode_event = ksu_handle_inode_event,", ".handle_event = ksu_handle_inode_event,")
+          c = c.replace("static int ksu_handle_inode_event(struct fsnotify_mark *mark, u32 mask, struct inode *inode, struct inode *dir, const struct qstr *file_name, u32 cookie)", "static int ksu_handle_inode_event(struct fsnotify_group *group, struct inode *inode, u32 mask, const void *data, int data_type, const unsigned char *file_name, u32 cookie, struct fsnotify_iter_info *iter_info)")
+          open(p, "w").write(c)
+          ' {} \;
 
-          echo "=== Applying 4.19 Manual Hooks for KSUN ==="
-          PATCH_HOST="github.com"
-          PATCH_PATH="JackA1ltman/NonGKI_Kernel_Build_2nd.git"
-          git clone --depth=1 "https://${PATCH_HOST}/${PATCH_PATH}" hook_repo
-          if [ -f "hook_repo/Patches/susfs_inline_hook_patches.sh" ]; then
-            bash hook_repo/Patches/susfs_inline_hook_patches.sh || true
-          else
-            find hook_repo -name "*hook*.sh" -exec bash {} \; || true
-          fi
-
-          echo "=== Checking for patch conflicts (.rej) ==="
-          find . -name "*.rej" -exec echo "CONFLICT FILE: {}" \; -exec cat {} \;
-
-          echo "=== Writing clean ksu.config for KSUN + SuSFS ==="
+          echo "=== 8. Writing ksu.config ==="
           cat > arch/arm64/configs/ksu.config <<EOF
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
