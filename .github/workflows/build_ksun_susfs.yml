@@ -34,7 +34,10 @@ jobs:
           curl -LSs "https://githubusercontent.com" | bash -s legacy
 
           echo "=== Downloading SuSFS 4.19 patches ==="
-          git clone --depth=1 -b kernel-4.19 https://gitlab.com susfs_repo
+          REPO_HOST="gitlab.com"
+          REPO_PATH="simonpunk/susfs4ksu.git"
+          git clone --depth=1 -b kernel-4.19 "https://${REPO_HOST}/${REPO_PATH}" susfs_repo
+
           cp -r susfs_repo/kernel_patches/fs/* fs/
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
 
