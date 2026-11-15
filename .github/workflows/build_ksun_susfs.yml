@@ -24,8 +24,8 @@ jobs:
             python3 adb zip curl xz-utils \
             clang llvm lld dwarves git unzip wget zstd jq ccache patch
 
-       - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
-         run: |
+      - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
+        run: |
           echo "=== 1. Backing up original 4.19-compatible SELinux code ==="
           mkdir -p ksu_selinux_backup
           cp -r KernelSU/kernel/selinux/* ksu_selinux_backup/ || true
