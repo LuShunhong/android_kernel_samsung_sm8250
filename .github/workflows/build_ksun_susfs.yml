@@ -25,26 +25,33 @@ jobs:
             clang llvm lld dwarves git unzip wget zstd jq ccache patch
 
 
-      - name: 4. Integrate KernelSU Next (legacy 4.19) & SuSFS
+      - name: Integrate KernelSU Next (legacy 4.19) & SuSFS
         run: |
           echo "=== Removing old KernelSU ==="
-          rm -rf KernelSU drivers/kernelsu
+          rm -rf KernelSU KernelSU-Next drivers/kernelsu
           
           echo "=== Installing KernelSU Next (legacy branch for 4.19) ==="
-          curl -LSs "https://githubusercontent.com" | bash -s legacy
+          KSU_HOST="://githubusercontent.com"
+          KSU_PATH="KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
+          curl -LSs "https://${KSU_HOST}/${KSU_PATH}" | bash -s legacy
+
+          echo "=== Checking created KSU directory ==="
+          ls -la
+          ls -la drivers/
 
           echo "=== Downloading SuSFS 4.19 patches ==="
           REPO_HOST="gitlab.com"
           REPO_PATH="simonpunk/susfs4ksu.git"
           git clone --depth=1 -b kernel-4.19 "https://${REPO_HOST}/${REPO_PATH}" susfs_repo
-
           cp -r susfs_repo/kernel_patches/fs/* fs/
           cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
 
           echo "=== Applying SuSFS patch to KernelSU Next ==="
-          cd KernelSU-Next || cd drivers/kernelsu
-          patch -p1 --fuzz=3 < ../../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
-          cd ../..
+          if [ -d "KernelSU-Next" ]; then
+            (cd KernelSU-Next && patch -p1 --fuzz=3 < ../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true)
+          elif [ -d "KernelSU" ]; then
+            (cd KernelSU && patch -p1 --fuzz=3 < ../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true)
+          fi
 
           echo "=== Applying SuSFS patch to 4.19 Kernel ==="
           patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
