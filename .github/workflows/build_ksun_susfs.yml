@@ -53,7 +53,15 @@ jobs:
           echo "=== Adding SuSFS v1.5.8+ API compatibility stubs ==="
           printf '#ifndef SUSFS_COMPAT_STUBS_H\n#define SUSFS_COMPAT_STUBS_H\n#include <linux/types.h>\nstatic inline bool susfs_is_current_proc_no_su(void) { return false; }\nstatic inline void susfs_set_current_proc_no_su(void) {}\nstatic inline void susfs_set_current_non_root_user_app_proc(void) {}\nstatic inline bool susfs_is_current_proc_umounted(void) { return false; }\nstatic inline void susfs_set_current_proc_umounted(void) {}\nstatic inline void susfs_set_current_proc_umounted_for_zygote_next(void) {}\n#endif\n' > include/linux/susfs_compat.h
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>' {} +
-          find KernelSU-Next -name "file_wrapper.c" -exec sed -i '/remap_file_range/,+1d' {} +
+          find KernelSU-Next -name "file_wrapper.c" -exec python3 -c '
+          import sys, re
+          p = sys.argv
+          c = open(p).read()
+          for fn in ["remap_file_range", "iopoll", "uring_cmd", "uring_cmd_iopoll"]:
+              c = re.sub(r"static [^{;]*\bksu_wrapper_" + fn + r"\b[\s\S]*?\n\}\n", "", c)
+              c = re.sub(r"[^\n]*\." + fn + r"\b[^\n]*\n([^\n]*ksu_wrapper_" + fn + r"[^\n]*\n)?", "", c)
+          open(p, "w").write(c)
+          ' {} \;
 
           echo "=== Applying SuSFS patch to 4.19 Kernel ==="
           patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
