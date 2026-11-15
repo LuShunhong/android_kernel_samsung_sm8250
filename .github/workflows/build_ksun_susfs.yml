@@ -23,7 +23,6 @@ jobs:
             binutils-aarch64-linux-gnu \
             python3 adb zip curl xz-utils \
             clang llvm lld dwarves git unzip wget zstd jq ccache patch
-
       - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
         run: |
           echo "=== 1. Backing up original 4.19-compatible SELinux code ==="
@@ -36,8 +35,9 @@ jobs:
           KSUN_PATH="pershoot/KernelSU-Next.git"
           git clone --depth=1 -b dev-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
 
-          echo "=== 3. Replacing SELinux folder with 4.19-native version & Linking ==="
+          echo "=== 3. Merging 4.19 SELinux with new inode.c & Linking ==="
           KSU_KDIR=$(find KernelSU-Next -name "Kconfig" -printf '%h\n' | head -n 1)
+          cp "$KSU_KDIR/selinux/inode.c" ksu_selinux_backup/ || true
           rm -rf "$KSU_KDIR/selinux"/*
           cp -r ksu_selinux_backup/* "$KSU_KDIR/selinux/"
           ln -s "$(pwd)/$KSU_KDIR" drivers/kernelsu
@@ -67,6 +67,7 @@ jobs:
           #define SUSFS_COMPAT_STUBS_H
           #include <linux/types.h>
           #include <linux/string.h>
+          #include <linux/version.h>
           #define SUSFS_MAGIC 0xFAFA1122
           #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55551
           #define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 0x55552
@@ -81,6 +82,8 @@ jobs:
           static inline bool susfs_is_current_proc_umounted(void) { return false; }
           static inline void susfs_set_current_proc_umounted(void) {}
           static inline void susfs_set_current_proc_umounted_for_zygote_next(void) {}
+          static inline bool susfs_is_sid_equal(void *sec, u32 sid2) { return false; }
+          static inline bool susfs_is_current_ksu_domain(void) { return false; }
           static inline void susfs_start_sdcard_monitor_fn(void) {}
           static inline int susfs_add_sus_path_loop(void *p) { return 0; }
           static inline int susfs_set_sus_path_uid_filter(void *p) { return 0; }
@@ -102,13 +105,18 @@ jobs:
           echo "=== 7. Repairing KernelSU-Next v3.4.2 for Linux 4.19 ==="
           find KernelSU-Next -name "throne_tracker.h" -exec sed -i '/susfs_parse_priority_app_strings/d; /susfs_parse_sus_path_app_strings/d' {} +
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|linux/minmax.h|linux/kernel.h|g; s|uapi/linux/mount.h|linux/mount.h|g' {} +
-          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>\n#include <linux/sched/task.h>\n#include <linux/sched/signal.h>' {} +
+          find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>\n#include <linux/version.h>\n#include <linux/sched/task.h>\n#include <linux/sched/signal.h>' {} +
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/TWA_RESUME/true/g; s/SECCOMP_ARCH_NATIVE_NR/__NR_syscalls/g' {} +
+
+          # Fix SELinux macros & ksu_file_sid compatibility
+          find KernelSU-Next -path "*/selinux/*" -type f -exec sed -i 's/KERNEL_SU_CONTEXT/"u:r:su:s0"/g; s/ZYGOTE_CONTEXT/"u:r:zygote:s0"/g; s/INIT_CONTEXT/"u:r:init:s0"/g; s/KERNEL_SU_DOMAIN/"su"/g; s/KERNEL_SU_FILE/"ksu_file"/g' {} +
+          find KernelSU-Next -name "selinux.h" -exec sed -i '$a extern u32 ksu_file_sid;\nstatic inline struct inode_security_struct *ksu_selinux_inode(struct inode *inode) { return inode->i_security; }' {} +
+          find KernelSU-Next -name "selinux.c" -exec sed -i '$a u32 ksu_file_sid = 0;' {} +
 
           # Fix file_wrapper.c
           find KernelSU-Next -name "file_wrapper.c" -exec python3 -c '
           import sys, re
-          p = sys.argv[1]
+          p = sys.argv
           c = open(p).read()
           for fn in ["remap_file_range", "iopoll", "uring_cmd", "uring_cmd_iopoll"]:
               c = re.sub(r"static [^{;]*\bksu_wrapper_" + fn + r"\b[\s\S]*?\n\}\n", "", c)
@@ -119,16 +127,17 @@ jobs:
           # Fix pkg_observer.c
           find KernelSU-Next -name "pkg_observer.c" -exec python3 -c '
           import sys, re
-          p = sys.argv[1]
+          p = sys.argv
           c = open(p).read()
           c = c.replace("fsnotify_wait_marks_destroyed();", "")
           c = c.replace(".handle_inode_event = ksu_handle_inode_event,", ".handle_event = ksu_handle_inode_event,")
+          c = c.replace("file_name->len == 13 && !memcmp(file_name->name, \"packages.list\", 13)", "file_name && strlen(file_name) == 13 && !memcmp(file_name, \"packages.list\", 13)")
           c = re.sub(r"static int ksu_handle_inode_event\([^)]*\)", "static int ksu_handle_inode_event(struct fsnotify_group *group, struct inode *inode, u32 mask, const void *data, int data_type, const unsigned char *file_name, u32 cookie, struct fsnotify_iter_info *iter_info)", c)
           open(p, "w").write(c)
           ' {} \;
 
-          # Disable 5.x-only selinux_hide feature in Kbuild
-          find KernelSU-Next -name "Kbuild" -exec sed -i '/selinux_hide\.o/d' {} +
+          # Disable 5.x-only features in Kbuild
+          find KernelSU-Next -name "Kbuild" -exec sed -i '/selinux_hide\.o/d; /shell_su_adb_only\.o/d' {} +
 
           echo "=== 8. Writing ksu.config ==="
           cat > arch/arm64/configs/ksu.config <<EOF
@@ -146,6 +155,7 @@ jobs:
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           EOF
+
 
       - name: 5. Build kernel for x1q
         run: |
