@@ -29,13 +29,12 @@ jobs:
         run: |
           echo "=== Removing old KernelSU ==="
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
-          
-          echo "=== Cloning KernelSU Next (pre-integrated legacy-susfs branch) ==="
-          KSUN_HOST="github.com"
-          KSUN_PATH="WildKernels/KernelSU-Next.git"
-          git clone --depth=1 -b legacy-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next || \
-          git clone --depth=1 -b next-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
 
+          echo "=== Cloning KernelSU Next (pre-integrated dev-susfs branch) ==="
+          KSUN_HOST="github.com"
+          KSUN_PATH="pershoot/KernelSU-Next.git"
+          git clone --depth=1 -b dev-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
+          
           echo "=== Linking drivers/kernelsu ==="
           KSU_KDIR=$(find KernelSU-Next -name "Kconfig" -printf '%h\n' | head -n 1)
           ln -s "$(pwd)/$KSU_KDIR" drivers/kernelsu
