@@ -34,6 +34,14 @@ jobs:
           KSU_HOST="://githubusercontent.com"
           KSU_PATH="KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
           curl -LSs "https://${KSU_HOST}/${KSU_PATH}" | bash -s legacy
+          echo "=== Installing KernelSU Next (legacy branch for 4.19) ==="
+          KSU_HOST="://githubusercontent.com"
+          KSU_PATH="KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
+          curl -LSs "https://${KSU_HOST}/${KSU_PATH}" | bash -s legacy
+
+          if [ -d "KernelSU-Next/kernel" ] && [ ! -e "drivers/kernelsu" ]; then
+            ln -sf ../KernelSU-Next/kernel drivers/kernelsu
+          fi
 
           echo "=== Checking created KSU directory ==="
           ls -la
