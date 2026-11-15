@@ -22,14 +22,8 @@ jobs:
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu \
             python3 adb zip curl xz-utils \
-            llvm lld dwarves git unzip wget zstd jq ccache patch
+            clang llvm lld dwarves git unzip wget zstd jq ccache patch
 
-      - name: 3. Download Prebuilt Clang
-        run: |
-          mkdir -p llvm-21
-          wget -O clang.tar.gz https://googlesource.com
-          tar -xzf clang.tar.gz -C llvm-21
-          rm clang.tar.gz
 
       - name: 4. Integrate KernelSU Next (legacy 4.19) & SuSFS
         run: |
@@ -73,7 +67,7 @@ jobs:
       - name: 5. Build kernel for x1q
         run: |
           chmod +x build_sm8250.sh
-          bash build_sm8250.sh x1q "$(pwd)/llvm-21"
+          bash build_sm8250.sh x1q
 
       - name: 6. Upload AnyKernel3 zip
         uses: actions/upload-artifact@v5
