@@ -24,9 +24,11 @@ jobs:
             python3 adb zip curl xz-utils \
             clang llvm lld dwarves git unzip wget zstd jq ccache patch
 
-      - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
-        run: |
-          echo "=== 1. Removing old KernelSU ==="
+       - name: Integrate KernelSU Next (v3.4.2 Repaired for 4.19) & SuSFS
+         run: |
+          echo "=== 1. Backing up original 4.19-compatible SELinux code ==="
+          mkdir -p ksu_selinux_backup
+          cp -r KernelSU/kernel/selinux/* ksu_selinux_backup/ || true
           rm -rf KernelSU KernelSU-Next drivers/kernelsu
           
           echo "=== 2. Cloning KernelSU Next (dev-susfs) ==="
@@ -34,8 +36,10 @@ jobs:
           KSUN_PATH="pershoot/KernelSU-Next.git"
           git clone --depth=1 -b dev-susfs "https://${KSUN_HOST}/${KSUN_PATH}" KernelSU-Next
 
-          echo "=== 3. Linking drivers/kernelsu ==="
+          echo "=== 3. Replacing SELinux folder with 4.19-native version & Linking ==="
           KSU_KDIR=$(find KernelSU-Next -name "Kconfig" -printf '%h\n' | head -n 1)
+          rm -rf "$KSU_KDIR/selinux"/*
+          cp -r ksu_selinux_backup/* "$KSU_KDIR/selinux/"
           ln -s "$(pwd)/$KSU_KDIR" drivers/kernelsu
 
           echo "=== 4. Downloading SuSFS 4.19 kernel patches ==="
@@ -54,7 +58,7 @@ jobs:
             bash hook_repo/Patches/susfs_inline_hook_patches.sh || true
           fi
 
-          echo "=== 6. Repairing 4.19 Kernel fs/ & susfs.h ==="
+          echo "=== 6. Repairing 4.19 Kernel fs/ & susfs_compat.h ==="
           sed -i 's/alloc_vfsmnt(fc->source ?: "none")/alloc_vfsmnt(fc->source ?: "none", false, 0)/g' fs/namespace.c
           sed -i 's/alloc_vfsmnt(old->mnt_devname)/alloc_vfsmnt(old->mnt_devname, false, 0)/g' fs/namespace.c
           
@@ -62,12 +66,15 @@ jobs:
           #ifndef SUSFS_COMPAT_STUBS_H
           #define SUSFS_COMPAT_STUBS_H
           #include <linux/types.h>
+          #include <linux/string.h>
           #define SUSFS_MAGIC 0xFAFA1122
           #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55551
           #define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 0x55552
           #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55553
           #define CMD_SUSFS_ADD_SUS_MAP 0x55554
           #define CMD_SUSFS_SET_PRIORITY_UID_FILTER 0x55555
+          #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x55556
+          struct st_susfs_avc_log_spoofing { int enabled; };
           static inline bool susfs_is_current_proc_no_su(void) { return false; }
           static inline void susfs_set_current_proc_no_su(void) {}
           static inline void susfs_set_current_non_root_user_app_proc(void) {}
@@ -81,21 +88,24 @@ jobs:
           static inline int susfs_enable_log(void *p) { return 0; }
           static inline int susfs_add_sus_map(void *p) { return 0; }
           static inline int susfs_set_priority_uid_filter(void *p) { return 0; }
+          static inline int susfs_set_avc_log_spoofing(void *p) { return 0; }
+          static inline int susfs_get_enabled_features(void *p) { return 0; }
+          static inline int susfs_show_variant(void *p) { return 0; }
+          static inline int susfs_show_version(void *p) { return 0; }
           static inline bool susfs_starts_with(const char *s, const char *p) { return strncmp(s, p, strlen(p)) == 0; }
           static inline bool susfs_ends_with(const char *s, const char *p) { size_t ls = strlen(s), lp = strlen(p); return ls >= lp && strcmp(s + ls - lp, p) == 0; }
           #endif
           EOF
           sed -i '1i #include <linux/susfs_compat.h>' include/linux/susfs.h
+          sed -i '1i #include <linux/susfs_compat.h>' include/linux/fs.h
 
           echo "=== 7. Repairing KernelSU-Next v3.4.2 for Linux 4.19 ==="
           find KernelSU-Next -name "throne_tracker.h" -exec sed -i '/susfs_parse_priority_app_strings/d; /susfs_parse_sus_path_app_strings/d' {} +
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's|linux/minmax.h|linux/kernel.h|g; s|uapi/linux/mount.h|linux/mount.h|g' {} +
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i '1i #include <linux/susfs_compat.h>\n#include <linux/sched/task.h>\n#include <linux/sched/signal.h>' {} +
-          
-          # Fix TWA_RESUME & SECCOMP_ARCH_NATIVE_NR
           find KernelSU-Next -type f \( -name "*.c" -o -name "*.h" \) -exec sed -i 's/TWA_RESUME/true/g; s/SECCOMP_ARCH_NATIVE_NR/__NR_syscalls/g' {} +
 
-          # Fix file_wrapper.c (iopoll & remap_file_range)
+          # Fix file_wrapper.c
           find KernelSU-Next -name "file_wrapper.c" -exec python3 -c '
           import sys, re
           p = sys.argv[1]
@@ -106,16 +116,19 @@ jobs:
           open(p, "w").write(c)
           ' {} \;
 
-          # Fix pkg_observer.c for 4.19 fsnotify_ops
+          # Fix pkg_observer.c
           find KernelSU-Next -name "pkg_observer.c" -exec python3 -c '
-          import sys
+          import sys, re
           p = sys.argv[1]
           c = open(p).read()
           c = c.replace("fsnotify_wait_marks_destroyed();", "")
           c = c.replace(".handle_inode_event = ksu_handle_inode_event,", ".handle_event = ksu_handle_inode_event,")
-          c = c.replace("static int ksu_handle_inode_event(struct fsnotify_mark *mark, u32 mask, struct inode *inode, struct inode *dir, const struct qstr *file_name, u32 cookie)", "static int ksu_handle_inode_event(struct fsnotify_group *group, struct inode *inode, u32 mask, const void *data, int data_type, const unsigned char *file_name, u32 cookie, struct fsnotify_iter_info *iter_info)")
+          c = re.sub(r"static int ksu_handle_inode_event\([^)]*\)", "static int ksu_handle_inode_event(struct fsnotify_group *group, struct inode *inode, u32 mask, const void *data, int data_type, const unsigned char *file_name, u32 cookie, struct fsnotify_iter_info *iter_info)", c)
           open(p, "w").write(c)
           ' {} \;
+
+          # Disable 5.x-only selinux_hide feature in Kbuild
+          find KernelSU-Next -name "Kbuild" -exec sed -i '/selinux_hide\.o/d' {} +
 
           echo "=== 8. Writing ksu.config ==="
           cat > arch/arm64/configs/ksu.config <<EOF
@@ -133,7 +146,6 @@ jobs:
           CONFIG_KSU_SUSFS_SPOOF_UNAME=y
           CONFIG_KSU_SUSFS_ENABLE_LOG=y
           EOF
-
 
       - name: 5. Build kernel for x1q
         run: |
