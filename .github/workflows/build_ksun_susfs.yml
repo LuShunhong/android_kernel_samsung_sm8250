@@ -1,0 +1,83 @@
+name: Build Astro Kernel x1q (KSUN + SuSFS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: 2. Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bc bison flex libssl-dev \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu \
+            python3 adb zip curl xz-utils \
+            llvm lld dwarves git unzip wget zstd jq ccache patch
+
+      - name: 3. Download latest Google clang
+        run: |
+          wget -O llvm.tar.zst https://github.com
+          mkdir -p llvm-21 && cd llvm-21
+          tar -I unzstd -xf ../llvm.tar.zst
+          rm ../llvm.tar.zst
+          cd ..
+
+      - name: 4. Integrate KernelSU Next (legacy 4.19) & SuSFS
+        run: |
+          echo "=== Removing old KernelSU ==="
+          rm -rf KernelSU drivers/kernelsu
+          
+          echo "=== Installing KernelSU Next (legacy branch for 4.19) ==="
+          curl -LSs "https://githubusercontent.com" | bash -s legacy
+
+          echo "=== Downloading SuSFS 4.19 patches ==="
+          git clone --depth=1 -b kernel-4.19 https://gitlab.com susfs_repo
+          cp -r susfs_repo/kernel_patches/fs/* fs/
+          cp -r susfs_repo/kernel_patches/include/linux/* include/linux/
+
+          echo "=== Applying SuSFS patch to KernelSU Next ==="
+          cd KernelSU-Next || cd drivers/kernelsu
+          patch -p1 --fuzz=3 < ../../susfs_repo/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ../..
+
+          echo "=== Applying SuSFS patch to 4.19 Kernel ==="
+          patch -p1 --fuzz=3 < susfs_repo/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+
+          echo "=== Checking for patch conflicts (.rej) ==="
+          find . -name "*.rej" -exec echo "CONFLICT FILE: {}" \; -exec cat {} \;
+
+          echo "=== Updating ksu.config ==="
+          cat >> arch/arm64/configs/ksu.config <<EOF
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          EOF
+
+      - name: 5. Build kernel for x1q
+        run: |
+          chmod +x build_sm8250.sh
+          bash build_sm8250.sh x1q "$(pwd)/llvm-21"
+
+      - name: 6. Upload AnyKernel3 zip
+        uses: actions/upload-artifact@v5
+        with:
+          name: Astro-Kernel-x1q-KSUN-SuSFS
+          path: Astro-Kernel-x1q-*.zip
