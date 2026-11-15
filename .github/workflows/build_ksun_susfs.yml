@@ -81,6 +81,7 @@ jobs:
           EOF
 
 
+
       - name: 5. Build kernel for x1q
         run: |
           chmod +x build_sm8250.sh
